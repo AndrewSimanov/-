@@ -1,0 +1,104 @@
+import requests
+import pandas as pd
+import matplotlib.pyplot as plt
+from datetime import datetime
+
+# --- Конфигурация API ---
+COINGECKO_API = "https://api.coingecko.com/api/v3"
+DEFILLAMA_API = "https://api.llama.fi"
+
+# Идентификаторы монет в CoinGecko
+COIN_IDS = {
+    "USDT": "tether",
+    "USDC": "usd-coin",
+    "DAI": "dai"
+}
+
+# --- Функция для получения рыночных данных ---
+def get_market_data(coin_id):
+    url = f"{COINGECKO_API}/coins/{coin_id}"
+    try:
+        resp = requests.get(url, timeout=10)
+        data = resp.json()
+        return {
+            "market_cap": data["market_data"]["market_cap"]["usd"],
+            "price": data["market_data"]["current_price"]["usd"],
+            "volume_24h": data["market_data"]["total_volume"]["usd"],
+            "price_change_24h": data["market_data"]["price_change_percentage_24h"]
+        }
+    except Exception as e:
+        print(f"Ошибка при запросе {coin_id}: {e}")
+        return None
+
+# --- Функция для получения TVL DAI из DeFiLlama ---
+def get_dai_tvl():
+    url = f"{DEFILLAMA_API}/protocol/MakerDAO"
+    try:
+        resp = requests.get(url, timeout=10)
+        data = resp.json()
+        # Берем последнее значение TVL
+        tvl = data["chainTvls"]["Ethereum"]["tvl"][-1]["totalLiquidityUSD"]
+        return tvl
+    except Exception as e:
+        print(f"Ошибка при запросе TVL DAI: {e}")
+        return None
+
+# --- Сбор данных ---
+market_results = {}
+for name, coin_id in COIN_IDS.items():
+    print(f"Запрашиваю данные для {name}...")
+    market_results[name] = get_market_data(coin_id)
+
+# TVL для DAI
+dai_tvl = get_dai_tvl()
+if dai_tvl:
+    market_results["DAI"]["tvl"] = dai_tvl
+
+# --- Создание DataFrame ---
+df = pd.DataFrame(market_results).T
+df.index.name = "Stablecoin"
+print("\nСобранные данные:")
+print(df)
+
+# --- Сохранение в CSV ---
+csv_filename = f"stablecoin_data_{datetime.now().strftime('%Y%m%d')}.csv"
+df.to_csv(csv_filename)
+print(f"\nДанные сохранены в {csv_filename}")
+
+# --- Визуализация ---
+fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+fig.suptitle("Сравнительный анализ стейблкоинов (январь 2026)", fontsize=16)
+
+# 1. Рыночная капитализация
+ax1 = axes[0, 0]
+df["market_cap"].plot(kind="bar", ax=ax1, color=["#26a17b", "#2775ca", "#f5a623"])
+ax1.set_title("Рыночная капитализация (USD)")
+ax1.set_ylabel("Млрд $")
+ax1.tick_params(axis="x", rotation=0)
+
+# 2. Цена (отклонение от $1)
+ax2 = axes[0, 1]
+(df["price"] - 1).plot(kind="bar", ax=ax2, color=["#26a17b", "#2775ca", "#f5a623"])
+ax2.set_title("Отклонение цены от $1 (депиг)")
+ax2.set_ylabel("$")
+ax2.axhline(y=0, color="black", linestyle="--", linewidth=0.8)
+
+# 3. Суточный объем торгов
+ax3 = axes[1, 0]
+df["volume_24h"].plot(kind="bar", ax=ax3, color=["#26a17b", "#2775ca", "#f5a623"])
+ax3.set_title("Объем торгов за 24ч (USD)")
+ax3.set_ylabel("Млрд $")
+
+# 4. TVL для DAI (доп. график)
+ax4 = axes[1, 1]
+if "tvl" in df.loc["DAI"]:
+    ax4.bar("DAI", df.loc["DAI"]["tvl"], color="#f5a623")
+    ax4.set_title("TVL DAI в MakerDAO (USD)")
+    ax4.set_ylabel("Млрд $")
+else:
+    ax4.text(0.5, 0.5, "TVL данные недоступны", ha="center", va="center")
+    ax4.set_title("TVL DAI")
+
+plt.tight_layout()
+plt.savefig("stablecoin_charts.png", dpi=300)
+plt.show()
